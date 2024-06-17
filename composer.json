@@ -1,0 +1,16 @@
+{
+  "name": "geardev/collector",
+  "description": "Collector. Part of toolkit to boost your development with Laravel and geardev.io",
+  "autoload": {
+    "psr-4": {
+      "GearDev\\Collector\\": "src/"
+    }
+  },
+  "extra": {
+    "laravel": {
+      "providers": [
+        "GearDev\\Collector\\GearCollectorLaravelProvider"
+      ]
+    }
+  }
+}
