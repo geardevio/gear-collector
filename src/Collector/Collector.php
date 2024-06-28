@@ -2,24 +2,34 @@
 
 namespace GearDev\Collector\Collector;
 
-use Illuminate\Foundation\Application;
 use Nette\PhpGenerator\ClassType;
 
 class Collector
 {
-    private static mixed $registeredPackagePaths = [];
-    private Application $app;
+    private static mixed $registeredPackagePaths = [
+        __DIR__.'/../../../', //all packages from geardevio
+    ];
 
-    private function __construct(Application $app)
+    private static array $pathToSkip = [];
+
+    private static array $attributeBasedThree;
+    private static array $classBasedThree;
+
+    private function __construct()
     {
-        $this->app = $app;
+        self::$pathToSkip = [
+            '/var/www/packages/frock',
+            '/var/www/packages/gear-autowire',
+            '/var/www/packages/gear-masko',
+            '/var/www/packages/gear-logger',
+        ];
     }
 
     private static ?self $instance = null;
 
     public static function getInstance(): self {
         if (self::$instance===null) {
-            self::$instance = new self(app());
+            self::$instance = new self();
         }
         return self::$instance;
     }
@@ -29,22 +39,22 @@ class Collector
         self::$registeredPackagePaths[] = $packagePath;
     }
 
-    public function collect(?string $path = null): void
+    public function collect(string $path): void
     {
-        if (!file_exists(storage_path('collector'))) {
-            mkdir(storage_path('collector'));
+        $storagePath = $path.'/../storage/collector';
+        if (!file_exists($storagePath)) {
+            mkdir($storagePath, 0777, true);
         }
-        if (!file_exists(storage_path('collector/.gitignore'))) {
-            file_put_contents(storage_path('collector/.gitignore'), "*\n!.gitignore\n");
+        if (!file_exists($storagePath.'/.gitignore')) {
+            file_put_contents($storagePath.'/.gitignore', "*\n!.gitignore\n");
         }
-        $path ??= app_path();
 
         $currentHash = $this->getHashOfAllMimeTypes($path);
 
         try {
-            $cachedHash = file_get_contents(storage_path('collector/annotationsHash'));
+            $cachedHash = file_get_contents($storagePath.'/annotationsHash');
         } catch (\Throwable $e) {
-            file_put_contents(storage_path('collector/annotationsHash'), '');
+            file_put_contents($storagePath.'/annotationsHash', '');
             $cachedHash = null;
         }
 
@@ -54,29 +64,30 @@ class Collector
             $classBasedThree = $this->createClassBasedThree($classes);
             $attributeBasedThree = $this->createAttributeBasedThree($classBasedThree);
             file_put_contents(
-                storage_path('collector/attributeBasedThree'),
+                $storagePath.'/attributeBasedThree',
                 "<?php\n\nreturn ".var_export($attributeBasedThree, true)."\n;"
             );
             file_put_contents(
-                storage_path('collector/classBasedThree'),
+                $storagePath.'/classBasedThree',
                 "<?php\n\nreturn ".var_export($classBasedThree, true)."\n;"
             );
-            file_put_contents(storage_path('collector/annotationsHash'), $currentHash);
+            file_put_contents($storagePath.'/annotationsHash', $currentHash);
 
-            $this->app->instance('attributeBasedThree', $attributeBasedThree);
-            $this->app->instance('classBasedThree', $classBasedThree);
+
+            self::$attributeBasedThree = $attributeBasedThree;
+            self::$classBasedThree = $classBasedThree;
+
         } else {
-            $this->app->instance('attributeBasedThree', include storage_path('collector/attributeBasedThree'));
-            $this->app->instance('classBasedThree', include storage_path('collector/classBasedThree'));
+            self::$attributeBasedThree = include $storagePath.'/attributeBasedThree';
+            self::$classBasedThree = include $storagePath.'/classBasedThree';
         }
     }
 
     public function getClassesByAnnotation(string $attribute) {
         try {
-            return $this->app->get('attributeBasedThree')[$attribute] ?? [];
+            return self::$attributeBasedThree[$attribute] ?? [];
         } catch (\Throwable $e) {
-            $this->collect();
-            return $this->app->get('attributeBasedThree')[$attribute] ?? [];
+            throw new \Exception('There is a problem with collector. Try remove files in storage/collector');
         }
     }
 
@@ -99,7 +110,7 @@ class Collector
                     }
                     /** @var AttributeInterface $attributeExemplar */
                     $attributeExemplar = new ($attribute->getAttributeClassName())(...$attribute->getArguments());
-                    $attributeExemplar->onClass($this->app, $className, $attributeExemplar);
+                    $attributeExemplar->onClass($className, $attributeExemplar);
                 }
             }
 
@@ -112,7 +123,7 @@ class Collector
                         }
                         /** @var AttributeInterface $attributeExemplar */
                         $attributeExemplar = new ($attribute->getAttributeClassName())(...$attribute->getArguments());
-                        $attributeExemplar->onMethod($this->app, $className, $methodName, $attributeExemplar);
+                        $attributeExemplar->onMethod($className, $methodName, $attributeExemplar);
                     }
                 }
             }
@@ -126,7 +137,7 @@ class Collector
                         }
                         /** @var AttributeInterface $attributeExemplar */
                         $attributeExemplar = new ($attribute->getAttributeClassName())(...$attribute->getArguments());
-                        $attributeExemplar->onProperty($this->app, $className, $propertyName, $attributeExemplar);
+                        $attributeExemplar->onProperty($className, $propertyName, $attributeExemplar);
                     }
                 }
             }
@@ -137,7 +148,7 @@ class Collector
         if (!str_starts_with('\\', $className)) {
             $className = '\\'.$className;
         }
-        return $this->app->get('classBasedThree')[$className] ?? [];
+        return self::$classBasedThree[$className] ?? [];
     }
 
     private function getFilesWithClassesRecursively(string $path, &$classes = [])
@@ -145,6 +156,7 @@ class Collector
         $files = glob($path . "/*");
         foreach ($files as $file) {
             if (is_dir($file)) {
+                if (in_array(realpath($file), self::$pathToSkip)) continue;
                 $this->getFilesWithClassesRecursively($file, $classes);
             } else {
                 if (str_ends_with($file, '.php')) {
@@ -336,6 +348,7 @@ class Collector
     private function addClassesFromRegisteredPackages(array $classes): array
     {
         foreach (self::$registeredPackagePaths as $path) {
+            if (!file_exists($path)) continue;
             $classesGot = $this->getFilesWithClassesRecursively($path);
             foreach ($classesGot as $class) {
                 $classes[] = $class;
