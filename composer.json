@@ -5,5 +5,8 @@
     "psr-4": {
       "GearDev\\Collector\\": "src/"
     }
-  }
+  },
+    "require": {
+        "nette/php-generator": "v4.1.5"
+    }
 }
