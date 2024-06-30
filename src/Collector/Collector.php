@@ -51,11 +51,12 @@ class Collector
 
         $currentHash = $this->getHashOfAllMimeTypes($path);
 
-        try {
-            $cachedHash = file_get_contents($storagePath.'/annotationsHash');
-        } catch (\Throwable $e) {
+
+        if (!file_exists($storagePath.'/annotationsHash')) {
             file_put_contents($storagePath.'/annotationsHash', '');
             $cachedHash = null;
+        } else {
+            $cachedHash = file_get_contents($storagePath.'/annotationsHash');
         }
 
         if ($cachedHash!=$currentHash) {
